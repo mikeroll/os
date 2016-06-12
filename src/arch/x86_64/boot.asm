@@ -1,4 +1,5 @@
 GLOBAL start
+EXTERN long_start
 
 section .text
 BITS 32
@@ -14,6 +15,18 @@ start:
     ; set up memory paging
     call setup_page_tables
     call enable_paging
+
+    ; load 64bit GDT
+    lgdt [gdt64.pointer]
+
+    ; update selectors from new GDT
+    mov ax, gdt64.data
+    mov ss, ax
+    mov ds, ax
+    mov es, ax
+
+    ; a far jump to a 64bit future
+    jmp gdt64.code:long_start
 
     mov dword [0xb8000], 0x2f4b2f4f
     hlt
@@ -142,6 +155,18 @@ enable_paging:
     ret
 
 
+section .rodata
+gdt64:
+    dq 0 ; zero entry
+.code: equ $ - gdt64
+    ; read allowed + executable + data/code bit + present + 64bit
+    dq (1 << 41) | (1 << 43) | (1 << 44) | (1 << 47) | (1 << 53)
+.data: equ $ - gdt64
+    ; write allowed + present + data/code bit
+    dq (1 << 41) | (1 << 44) | (1 << 47)
+.pointer:
+    dw $ - gdt64 - 1  ; gdt64 length - 1
+    dq gdt64          ; gdt64 address
 
 ; memory & stack
 section .bss
