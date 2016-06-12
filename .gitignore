@@ -3,3 +3,4 @@ info/
 *.o
 *.bin
 *.iso
+*.sublime-workspace

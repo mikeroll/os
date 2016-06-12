@@ -11,11 +11,15 @@ start:
     call check_cpuid
     call check_long_mode
 
+    ; set up memory paging
+    call setup_page_tables
+    call enable_paging
+
     mov dword [0xb8000], 0x2f4b2f4f
     hlt
 
 ; print an error code and halt
-error:
+fatal_error:
     ; 0xb8000 is a VGA text buffer
     mov dword [0xb8000], 0x4f524f45  ; RE
     mov dword [0xb8004], 0x4f3a4f52  ; :R
@@ -24,7 +28,7 @@ error:
     hlt
 
 
-; === checks begin ===
+; === sanity checks ===
 check_multiboot:
     ; According to Multiboot 2, the bootloader must write
     ; the magic value 0x36d76289 to eax before loading a kernel
@@ -33,7 +37,7 @@ check_multiboot:
     ret
 .no_multiboot:
     mov al, "0"
-    jmp error
+    jmp fatal_error
 
 
 check_cpuid:
@@ -65,7 +69,7 @@ check_cpuid:
     ret
 .no_cpuid:
     mov al, "1"
-    jmp error
+    jmp fatal_error
 
 
 check_long_mode:
@@ -83,11 +87,75 @@ check_long_mode:
     ret
 .no_long_mode:
     mov al, "2"
-    jmp error
+    jmp fatal_error
 
 
-; this is the stack!
+; === memory management stuff ===
+setup_page_tables:
+    ; map first PML4 entry to PDP table
+    mov eax, pdp_table
+    or eax, 0b11 ; present + writable
+    mov [pml4_table], eax
+
+    ; map first PDP entry to PD table
+    mov eax, pd_table
+    or eax, 0b11 ; present + writable
+    mov [pdp_table], eax
+
+    ; map each PDT entry to a 2MiB hugepage
+    mov ecx, 0
+.map_pd_entry:
+    ; each loop iteration creates a 64b descriptor in the PD table
+    mov eax, 0x200000               ; 2MiB
+    mul ecx                         ; eax == 2MiB * ecx
+    or eax, 0b10000011              ; present + writable + huge
+    mov [pd_table + ecx * 8], eax   ; map ecx-th entry
+
+    inc ecx
+    cmp ecx, 512
+    jne .map_pd_entry
+
+    ret
+
+
+enable_paging:
+    ; load PML4 table address into CR3
+    mov eax, pml4_table
+    mov cr3, eax
+
+    ; enable PAE in CR4
+    mov eax, cr4
+    or eax, 1 << 5
+    mov cr4, eax
+
+    ; set LME (Long Mode Enable bit) in EFER MSR
+    mov ecx, 0xC0000080 ; EFER address
+    rdmsr
+    or eax, 1 << 8      ; set LME bit
+    wrmsr
+
+    ; enable paging in CR0
+    mov eax, cr0
+    or eax, 1 << 31     ; set PG bit
+    mov cr0, eax
+
+    ret
+
+
+
+; memory & stack
 section .bss
+align 4096
+pml4_table:
+    ; Page-Map Level-4 Table
+    resb 4096
+pdp_table:
+    ; Page-Directory Pointer Table
+    resb 4096
+pd_table:
+    ; Page-Directory Table
+    resb 4096
+
 stack_bottom:
     resb 64
 stack_top:
