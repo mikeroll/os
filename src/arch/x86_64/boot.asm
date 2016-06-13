@@ -11,6 +11,10 @@ start:
     call check_multiboot
     call check_cpuid
     call check_long_mode
+    call check_SSE
+
+    ; enable SSE
+    call enable_SSE
 
     ; set up memory paging
     call setup_page_tables
@@ -101,6 +105,34 @@ check_long_mode:
 .no_long_mode:
     mov al, "2"
     jmp fatal_error
+
+
+check_SSE:
+    ; test if SSE is supported
+    mov eax, 0x1
+    cpuid
+    test edx, 1 << 25
+    jz .no_SSE
+    ret
+.no_SSE:
+    mov al, "3"
+    jmp fatal_error
+
+
+; === features
+enable_SSE:
+    mov eax, cr0
+    and al, 0xFB           ; disable coprocessor emulation (CR0.EM)
+    or al, 1 << 1          ; enable coprocessor monitoring (CR0.MP)
+    mov cr0, eax
+
+    mov eax, cr4
+    or ax, 3 << 9          ; CR4.OSFXSR (SSE + fast FPU save/restore)
+                           ; CR4.OSXMMEXCPT (unmasked SSE exceptions)
+    mov cr4, eax
+
+    ret
+
 
 
 ; === memory management stuff ===
